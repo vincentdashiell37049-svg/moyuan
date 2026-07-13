@@ -1,10 +1,10 @@
-import db from './index';
+import type Database from 'better-sqlite3';
 
 /**
  * 种子数据脚本
  * 插入演示数据用于开发调试
  */
-function seed(): void {
+function seed(db: Database.Database): void {
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   console.log('开始插入种子数据...');
@@ -439,13 +439,16 @@ function seed(): void {
   console.log('种子数据插入完成！');
 }
 
-// 执行种子数据插入
-try {
-  seed();
-} catch (error) {
-  console.error('种子数据插入失败：', error);
-  process.exit(1);
-}
+export { seed };
 
-// 退出
-process.exit(0);
+// 直接运行此文件时执行种子数据插入
+if (require.main === module) {
+  const db = require('./index').default;
+  try {
+    seed(db);
+  } catch (error) {
+    console.error('种子数据插入失败：', error);
+    process.exit(1);
+  }
+  process.exit(0);
+}

@@ -21,4 +21,13 @@ db.pragma('foreign_keys = ON');
 // 初始化表结构
 initSchema(db);
 
+// 自动播种：首次启动时插入演示数据
+const materialCount = db.prepare('SELECT COUNT(*) as count FROM materials').get() as { count: number };
+if (materialCount.count === 0) {
+  console.log('[数据库] 首次启动，正在插入种子数据...');
+  const { seed } = require('./seed');
+  seed(db);
+  console.log('[数据库] 种子数据插入完成');
+}
+
 export default db;
