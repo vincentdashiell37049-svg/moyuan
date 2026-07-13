@@ -1,4 +1,5 @@
 import path from 'path';
+import fs from 'fs';
 
 interface AppConfig {
   port: number;
@@ -10,6 +11,7 @@ interface AppConfig {
   };
   dbPath: string;
   uploadsDir: string;
+  clientDist: string;
   isDev: boolean;
 }
 
@@ -24,6 +26,17 @@ function getEnvNumber(key: string, defaultValue: number): number {
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
+const defaultDbPath = path.resolve(process.cwd(), 'data/moyuan.db');
+const defaultUploadsDir = path.resolve(process.cwd(), 'uploads');
+const defaultClientDist = path.resolve(process.cwd(), 'client/dist');
+
+// 确保目录存在
+const dbPath = getEnvString('DB_PATH', defaultDbPath);
+const uploadsDir = getEnvString('UPLOADS_DIR', defaultUploadsDir);
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
 const config: AppConfig = {
   port: getEnvNumber('PORT', 3001),
   ai: {
@@ -32,8 +45,9 @@ const config: AppConfig = {
     model: getEnvString('AI_MODEL', 'qwen2.5:14b'),
     chatModel: getEnvString('AI_CHAT_MODEL', 'qwen2.5:14b'),
   },
-  dbPath: path.resolve(__dirname, '../../data/moyuan.db'),
-  uploadsDir: path.resolve(__dirname, '../../uploads'),
+  dbPath,
+  uploadsDir,
+  clientDist: getEnvString('CLIENT_DIST', defaultClientDist),
   isDev: getEnvString('NODE_ENV', 'development') !== 'production',
 };
 

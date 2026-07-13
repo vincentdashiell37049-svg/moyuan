@@ -7,7 +7,7 @@
     "dev:server": "cd server && npx tsx watch src/index.ts",
     "dev:client": "cd client && npx vite",
     "build": "cd client && npx vite build",
-    "start": "cd server && npx tsx src/index.ts",
+    "start": "npx tsx server/src/index.ts",
     "install:all": "npm install && cd server && npm install && cd ../client && npm install"
   },
   "devDependencies": {

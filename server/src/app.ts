@@ -56,7 +56,19 @@ app.use('/api/ocr', ocrRoutes);
 app.use('/api/ai', aiRoutes);
 
 // ========================================
-// 404 处理
+// 前端静态文件（生产模式）
+// ========================================
+
+if (!config.isDev && config.clientDist) {
+  app.use(express.static(config.clientDist));
+  // SPA fallback: 非 /api 路由都返回 index.html
+  app.get('*', (_req: Request, res: Response) => {
+    res.sendFile(path.join(config.clientDist, 'index.html'));
+  });
+}
+
+// ========================================
+// 404 处理（仅开发模式会走到这里）
 // ========================================
 app.use((_req: Request, res: Response) => {
   res.status(404).json({
