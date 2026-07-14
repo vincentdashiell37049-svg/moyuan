@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
-import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-const worker = new PdfWorker()
-pdfjs.GlobalWorkerOptions.workerPort = worker
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 interface PdfPageViewerProps {
   pdfUrl: string
