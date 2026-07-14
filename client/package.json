@@ -14,7 +14,7 @@
     "diff-match-patch": "^1.0.5",
     "echarts": "^6.1.0",
     "echarts-for-react": "^3.0.6",
-    "pdfjs-dist": "^6.1.200",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
