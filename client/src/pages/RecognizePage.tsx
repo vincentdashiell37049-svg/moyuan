@@ -32,6 +32,14 @@ interface OcrResultData {
   blocks: OcrBlockResult[]
 }
 
+interface AiPunctuationResult {
+  punctuated: string
+  translation: string
+  reasoning: string
+  mode: 'ai' | 'rule'
+  fallback?: boolean
+}
+
 interface Tag {
   id: string
   name: string
@@ -159,6 +167,10 @@ export default function RecognizePage() {
   const [editableText, setEditableText] = useState<Record<string, string>>({})
   const [error, setError] = useState<string>('')
 
+  const [aiPunctuationResult, setAiPunctuationResult] = useState<AiPunctuationResult | null>(null)
+  const [aiPunctuationLoading, setAiPunctuationLoading] = useState(false)
+  const [aiPunctuationError, setAiPunctuationError] = useState<string>('')
+
   /* 保存弹窗 */
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [tags, setTags] = useState<Tag[]>([])
@@ -218,7 +230,7 @@ export default function RecognizePage() {
         setError(`文件 "${f.name}" 超过 50MB 大小限制`)
         continue
       }
-      const previewUrl = f.type.startsWith('image/') ? URL.createObjectURL(f) : undefined
+      const previewUrl = URL.createObjectURL(f)
       validFiles.push({ file: f, previewUrl })
     }
 
@@ -381,6 +393,9 @@ export default function RecognizePage() {
     setEditableText({})
     setActiveTab('ocr')
     setOverallProgress(0)
+    setAiPunctuationResult(null)
+    setAiPunctuationError('')
+    setAiPunctuationLoading(false)
     setPageState('uploaded')
   }, [])
 
@@ -488,6 +503,9 @@ export default function RecognizePage() {
     setEditableText({})
     setActiveTab('ocr')
     setError('')
+    setAiPunctuationResult(null)
+    setAiPunctuationError('')
+    setAiPunctuationLoading(false)
     setPageState('idle')
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current)
@@ -510,6 +528,38 @@ export default function RecognizePage() {
     },
     [activeTab],
   )
+
+  /* ---------- AI 自动标点 ---------- */
+  const handleAiPunctuate = useCallback(async () => {
+    if (!result) return
+    setAiPunctuationLoading(true)
+    setAiPunctuationError('')
+    setAiPunctuationResult(null)
+
+    try {
+      const sourceText = editableText.simplified || result.simplifiedText || result.ocrText
+      const res = await fetch('/api/ai/punctuate-explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: sourceText }),
+      })
+      if (!res.ok) throw new Error('请求失败')
+      const data = await res.json()
+      const pr: AiPunctuationResult = {
+        punctuated: data.punctuated || data.text || '',
+        translation: data.translation || data.vernacular || '',
+        reasoning: data.reasoning || data.explanation || '',
+        mode: data.mode || 'rule',
+        fallback: data.fallback,
+      }
+      setAiPunctuationResult(pr)
+      setEditableText((prev) => ({ ...prev, simplified: pr.punctuated }))
+    } catch (err) {
+      setAiPunctuationError(err instanceof Error ? err.message : 'AI 标点请求失败')
+    } finally {
+      setAiPunctuationLoading(false)
+    }
+  }, [result, editableText.simplified])
 
   /* ===================== 渲染 ===================== */
 
@@ -1206,17 +1256,31 @@ export default function RecognizePage() {
                   backgroundColor: 'var(--bg2)',
                 }}
               >
-                {files.some((f) => f.previewUrl) ? (
-                  <img
-                    src={files.find((f) => f.previewUrl)?.previewUrl}
-                    alt="原始图片"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain',
-                      borderRadius: '4px',
-                    }}
-                  />
+              {files[0]?.previewUrl ? (
+                  files[0]?.file.type === 'application/pdf' ? (
+                    <embed
+                      src={files[0].previewUrl}
+                      type="application/pdf"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        minHeight: '420px',
+                        borderRadius: '4px',
+                        border: 'none',
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src={files[0].previewUrl}
+                      alt="原始图片"
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: '100%',
+                        objectFit: 'contain',
+                        borderRadius: '4px',
+                      }}
+                    />
+                  )
                 ) : (
                   <div
                     style={{
@@ -1300,62 +1364,269 @@ export default function RecognizePage() {
                 ))}
               </div>
 
-              {/* 文本编辑区 + 置信度指示 */}
-              <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-                {/* 置信度色条 */}
-                <div
-                  style={{
-                    width: '6px',
-                    flexShrink: 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    padding: '16px 0',
-                  }}
-                >
-                  {result.blocks.length > 0
-                    ? result.blocks.map((block, i) => (
-                        <div
-                          key={i}
-                          title={`置信度: ${(block.confidence * 100).toFixed(0)}% (${getConfidenceLabel(block.confidence)})`}
-                          style={{
-                            flex: 1,
-                            backgroundColor: getConfidenceColor(block.confidence),
-                            opacity: 0.8,
-                            borderRadius: '1px',
-                            cursor: 'help',
-                          }}
-                        />
-                      ))
-                    : Array.from({ length: 10 }).map((_, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            flex: 1,
-                            backgroundColor: getConfidenceColor(0.85),
-                            opacity: 0.3,
-                            borderRadius: '1px',
-                          }}
-                        />
-                      ))}
+              {/* 文本编辑区 + AI 结果 */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+                {/* 可编辑文本行 */}
+                <div style={{ display: 'flex', minHeight: '280px', flex: '1 0 auto' }}>
+                  {/* 置信度色条 */}
+                  <div
+                    style={{
+                      width: '6px',
+                      flexShrink: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      padding: '16px 0',
+                    }}
+                  >
+                    {result.blocks.length > 0
+                      ? result.blocks.map((block, i) => (
+                          <div
+                            key={i}
+                            title={`置信度: ${(block.confidence * 100).toFixed(0)}% (${getConfidenceLabel(block.confidence)})`}
+                            style={{
+                              flex: 1,
+                              backgroundColor: getConfidenceColor(block.confidence),
+                              opacity: 0.8,
+                              borderRadius: '1px',
+                              cursor: 'help',
+                            }}
+                          />
+                        ))
+                      : Array.from({ length: 10 }).map((_, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              flex: 1,
+                              backgroundColor: getConfidenceColor(0.85),
+                              opacity: 0.3,
+                              borderRadius: '1px',
+                            }}
+                          />
+                        ))}
+                  </div>
+                  {/* 可编辑文本 */}
+                  <textarea
+                    value={currentTabText}
+                    onChange={(e) => handleTabTextChange(e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '16px',
+                      border: 'none',
+                      outline: 'none',
+                      resize: 'none',
+                      fontSize: '15px',
+                      lineHeight: '2',
+                      color: 'var(--ink)',
+                      fontFamily: '"STSong", "SimSun", "宋体", serif',
+                      backgroundColor: 'transparent',
+                    }}
+                    placeholder="暂无识别结果"
+                  />
                 </div>
-                {/* 可编辑文本 */}
-                <textarea
-                  value={currentTabText}
-                  onChange={(e) => handleTabTextChange(e.target.value)}
-                  style={{
-                    flex: 1,
-                    padding: '16px',
-                    border: 'none',
-                    outline: 'none',
-                    resize: 'none',
-                    fontSize: '15px',
-                    lineHeight: '2',
-                    color: 'var(--ink)',
-                    fontFamily: '"STSong", "SimSun", "宋体", serif',
-                    backgroundColor: 'transparent',
-                  }}
-                  placeholder="暂无识别结果"
-                />
+
+                {/* AI 自动标点（仅简体标点 Tab） */}
+                {activeTab === 'simplified' && (
+                  <div
+                    style={{
+                      padding: '16px 20px',
+                      borderTop: '1px solid var(--rule)',
+                      backgroundColor: 'rgba(255,255,255,0.7)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '12px',
+                      }}
+                    >
+                      <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>
+                        AI 智能处理
+                      </span>
+                      <button
+                        onClick={handleAiPunctuate}
+                        disabled={aiPunctuationLoading}
+                        style={{
+                          padding: '8px 18px',
+                          backgroundColor: aiPunctuationLoading ? 'var(--rule)' : 'var(--accent)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          cursor: aiPunctuationLoading ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          transition: 'opacity 0.15s',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!aiPunctuationLoading) e.currentTarget.style.opacity = '0.85'
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.opacity = '1'
+                        }}
+                      >
+                        {aiPunctuationLoading ? (
+                          <>
+                            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                              <path d="M10 2a8 8 0 0 1 8 8" stroke="#fff" strokeWidth="1.5" strokeLinecap="round">
+                                <animateTransform attributeName="transform" type="rotate" from="0 10 10" to="360 10 10" dur="1s" repeatCount="indefinite" />
+                              </path>
+                            </svg>
+                            AI 处理中...
+                          </>
+                        ) : (
+                          <>
+                            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                              <path d="M10 2a2 2 0 0 1 2 2v4.5l2.6-1.5a2 2 0 0 1 2.7 2.7l-2.6 1.5 2.6 1.5a2 2 0 1 1-2.7 2.7L12 13.5V18a2 2 0 1 1-4 0v-4.5l-2.6 1.5a2 2 0 1 1-2.7-2.7l2.6-1.5-2.6-1.5a2 2 0 1 1 2.7-2.7L8 8.5V4a2 2 0 0 1 2-2z" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            AI 自动标点
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {aiPunctuationError && (
+                      <div
+                        style={{
+                          padding: '10px 12px',
+                          backgroundColor: '#fef2f2',
+                          borderRadius: '6px',
+                          color: '#dc2626',
+                          fontSize: '13px',
+                          marginBottom: '12px',
+                        }}
+                      >
+                        {aiPunctuationError}
+                      </div>
+                    )}
+
+                    {aiPunctuationResult && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div
+                          style={{
+                            padding: '12px',
+                            backgroundColor: '#fff',
+                            borderRadius: '8px',
+                            border: '1px solid var(--rule)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              color: 'var(--accent)',
+                              fontWeight: 600,
+                              marginBottom: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                              <path d="M5 3h10a2 2 0 0 1 2 2v12l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L5 17V5a2 2 0 0 1 2-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            标点文本
+                            {aiPunctuationResult.mode === 'rule' && (
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  color: 'var(--muted)',
+                                  fontWeight: 400,
+                                  marginLeft: 'auto',
+                                }}
+                              >
+                                规则模式
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '14px',
+                              lineHeight: '1.8',
+                              color: 'var(--ink)',
+                              fontFamily: '"STSong", "SimSun", "宋体", serif',
+                            }}
+                          >
+                            {aiPunctuationResult.punctuated}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            padding: '12px',
+                            backgroundColor: '#fff',
+                            borderRadius: '8px',
+                            border: '1px solid var(--rule)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              color: 'var(--accent2)',
+                              fontWeight: 600,
+                              marginBottom: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                              <path d="M7 9h6M7 12h4M5 3h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            </svg>
+                            白话文翻译
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '14px',
+                              lineHeight: '1.8',
+                              color: 'var(--ink)',
+                            }}
+                          >
+                            {aiPunctuationResult.translation}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            padding: '12px',
+                            backgroundColor: '#fff',
+                            borderRadius: '8px',
+                            border: '1px solid var(--rule)',
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: '12px',
+                              color: 'var(--accent2)',
+                              fontWeight: 600,
+                              marginBottom: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                              <path d="M9.5 3a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM2 9.5a7.5 7.5 0 1 1 14.7 2.5M15 15l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            </svg>
+                            断句理由
+                          </div>
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              lineHeight: '1.7',
+                              color: 'var(--muted)',
+                            }}
+                          >
+                            {aiPunctuationResult.reasoning}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>

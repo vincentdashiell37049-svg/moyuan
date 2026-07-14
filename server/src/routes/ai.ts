@@ -114,6 +114,106 @@ ${String(text)}`;
   }
 });
 
+// POST /api/ai/punctuate-explain - 自动标点 + 白话翻译 + 断句理由
+router.post('/punctuate-explain', async (req: Request, res: Response) => {
+  try {
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ code: 400, message: 'text 不能为空' });
+    }
+
+    const original = String(text).trim();
+
+    // 未配置 AI 时回退到规则
+    if (!config.ai.apiKey) {
+      const punctuated = simplePunctuate(original);
+      return res.json({
+        original,
+        punctuated,
+        translation: simpleTranslate(original),
+        reasoning: simpleReasoning(original, punctuated),
+        mode: 'rule',
+      });
+    }
+
+    const prompt = `你是一位古文标点与注释专家。请为以下古文完成三项任务，并严格按照指定格式输出：
+
+1. 为古文添加适当的标点符号；
+2. 给出白话文翻译；
+3. 简要说明断句和标点的理由。
+
+请按以下格式输出，不要添加额外内容：
+
+【标点文本】
+（添加标点后的古文）
+
+【白话翻译】
+（现代汉语翻译）
+
+【断句理由】
+（简要说明断句依据，如虚词、句式、语义层次等）
+
+古文：
+${original}`;
+
+    const response = await fetch(`${config.ai.apiBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.ai.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.ai.chatModel,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.3,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error('[AI Punctuate Explain] API error, falling back to rules:', response.status);
+      const punctuated = simplePunctuate(original);
+      return res.json({
+        original,
+        punctuated,
+        translation: simpleTranslate(original),
+        reasoning: simpleReasoning(original, punctuated),
+        mode: 'rule',
+        fallback: true,
+      });
+    }
+
+    const data = await response.json() as any;
+    const content = data.choices[0].message.content.trim();
+
+    // 解析 AI 返回的格式
+    const punctuated = extractSection(content, '【标点文本】', '【白话翻译】') || simplePunctuate(original);
+    const translation = extractSection(content, '【白话翻译】', '【断句理由】') || simpleTranslate(original);
+    const reasoning = extractSection(content, '【断句理由】', '') || simpleReasoning(original, punctuated);
+
+    res.json({
+      original,
+      punctuated,
+      translation,
+      reasoning,
+      mode: 'ai',
+    });
+  } catch (err) {
+    console.error('[AI Punctuate Explain Error]', err);
+    const original = String(req.body.text || '');
+    const punctuated = simplePunctuate(original);
+    res.json({
+      original,
+      punctuated,
+      translation: simpleTranslate(original),
+      reasoning: simpleReasoning(original, punctuated),
+      mode: 'rule',
+      fallback: true,
+      error: 'AI 处理失败，已回退到规则模式',
+    });
+  }
+});
+
 // 简单规则标点函数
 function simplePunctuate(text: string): string {
   let result = text;
@@ -133,21 +233,18 @@ function simplePunctuate(text: string): string {
   }
 
   // 在每句中间适当添加逗号（简单的启发式规则：每8-12个字符添加逗号）
-  // 这个规则比较粗糙，仅作为 demo 模式的备用
   const sentences = result.split(/。|！|？/);
   const punctuatedSentences = sentences.map((sentence) => {
     if (sentence.length <= 4) return sentence;
-    // 在较长的句子中间插入逗号
     let s = sentence;
     let charCount = 0;
     const resultChars: string[] = [];
     for (let i = 0; i < s.length; i++) {
       resultChars.push(s[i]);
       charCount++;
-      // 大约每8-12个字添加逗号，但避免在引号、书名号处添加
       if (charCount >= 10 && i < s.length - 1) {
         const nextChar = s[i + 1];
-        if (nextChar !== '」' && nextChar !== '"' && nextChar !== '>' && nextChar !== '》') {
+        if (!['」', '"', '>', '》'].includes(nextChar)) {
           resultChars.push('，');
           charCount = 0;
         }
@@ -156,14 +253,31 @@ function simplePunctuate(text: string): string {
     return resultChars.join('');
   });
 
-  // 重新组合
   result = punctuatedSentences.join('。');
-  // 确保末尾有句号
   if (result.length > 0 && !/[。！？]$/.test(result)) {
     result += '。';
   }
 
   return result;
+}
+
+function simpleTranslate(_text: string): string {
+  return '（当前未配置 AI 服务，无法提供白话文翻译。请在 .env 中设置 AI_API_KEY 后重试。）';
+}
+
+function simpleReasoning(_text: string, _punctuated: string): string {
+  return '（当前未配置 AI 服务，仅使用基础规则断句。规则依据：根据常见古汉语句读格式，在语义完整处添加句号，在长句适当位置添加逗号。）';
+}
+
+function extractSection(text: string, startMarker: string, endMarker: string): string | null {
+  const startIdx = text.indexOf(startMarker);
+  if (startIdx === -1) return null;
+  const contentStart = startIdx + startMarker.length;
+  const endIdx = endMarker ? text.indexOf(endMarker, contentStart) : -1;
+  const contentEnd = endIdx === -1 ? text.length : endIdx;
+  const section = text.slice(contentStart, contentEnd).trim();
+  // 去除可能的自身标记前缀（如 AI 重复了标签）
+  return section || null;
 }
 
 export default router;
