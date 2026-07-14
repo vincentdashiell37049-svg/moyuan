@@ -45,7 +45,7 @@ router.get('/entities', (req: Request, res: Response) => {
     sql += ' ORDER BY e.updated_at DESC';
 
     const entities = db.prepare(sql).all(...params);
-    res.json(entities);
+    res.json({ code: 0, message: '获取成功', data: entities });
   } catch (err) {
     console.error('[Graph Entities List Error]', err);
     res.status(500).json({ code: 500, message: '获取实体列表失败' });
@@ -74,7 +74,7 @@ router.get('/relations', (req: Request, res: Response) => {
 
     sql += ' ORDER BY r.created_at DESC';
     const relations = db.prepare(sql).all(...params);
-    res.json(relations);
+    res.json({ code: 0, message: '获取成功', data: relations });
   } catch (err) {
     console.error('[Graph Relations List Error]', err);
     res.status(500).json({ code: 500, message: '获取关系列表失败' });
@@ -86,8 +86,9 @@ router.get('/visualize', (req: Request, res: Response) => {
   try {
     const { types, centerEntityId } = req.query;
 
-    // 构建 categories
-    const categories = Object.entries(TYPE_LABELS).map(([type, name]) => ({ name }));
+    // 构建 categories — 按前端 ALL_TYPES 顺序排列
+    const categoriesOrder = ['person', 'place', 'event', 'time', 'official_title', 'institution'];
+    const categories = categoriesOrder.map((type) => ({ name: TYPE_LABELS[type] || type }));
 
     // 获取所有实体
     let entitySql = 'SELECT e.*, COUNT(r.id) as relation_count FROM entities e';
@@ -125,12 +126,13 @@ router.get('/visualize', (req: Request, res: Response) => {
     const entities = db.prepare(entitySql).all(...params) as any[];
 
     // 构建 nodes，symbolSize 根据关系数量动态计算（最少30，最多80）
+    // 前端 ALL_TYPES 顺序: person, place, event, time, official_title, institution
     const typeIndexMap: Record<string, number> = {
       person: 0,
       place: 1,
-      official_title: 2,
-      event: 3,
-      time: 4,
+      event: 2,
+      time: 3,
+      official_title: 4,
       institution: 5,
     };
 
@@ -169,9 +171,13 @@ router.get('/visualize', (req: Request, res: Response) => {
     }
 
     res.json({
-      nodes,
-      edges,
-      categories,
+      code: 0,
+      message: '获取成功',
+      data: {
+        nodes,
+        edges,
+        categories,
+      },
     });
   } catch (err) {
     console.error('[Graph Visualize Error]', err);
@@ -310,17 +316,17 @@ router.get('/stats', (_req: Request, res: Response) => {
     const totalRelations = relationStats.reduce((sum, s) => sum + s.count, 0);
 
     res.json({
-      entities: {
-        total: totalEntities,
-        byType: entityStats.map((s) => ({
+      code: 0,
+      message: '获取成功',
+      data: {
+        entityCount: totalEntities,
+        edgeCount: totalRelations,
+        entitiesByType: entityStats.map((s) => ({
           type: s.type,
           label: TYPE_LABELS[s.type] || s.type,
           count: s.count,
         })),
-      },
-      relations: {
-        total: totalRelations,
-        byType: relationStats.map((s) => ({
+        relationsByType: relationStats.map((s) => ({
           type: s.type,
           count: s.count,
         })),
