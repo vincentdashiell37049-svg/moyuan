@@ -31,13 +31,22 @@ class ApiClient {
       )
     }
 
-    const json: ApiResponse<T> = await response.json()
+    const json: ApiResponse<T> & Record<string, any> = await response.json()
 
-    if (json.code !== 0) {
+    // 兼容两种后端响应格式：
+    // 1) { code: 0, data: T, message?: string }
+    // 2) { data: T, message?: string }（无 code 时视为成功）
+    // 3) 直接返回数组或对象（如 /api/tags 返回标签数组）
+    if (json.code !== undefined && json.code !== 0) {
       throw new Error(json.message || '请求失败')
     }
 
-    return json.data
+    if (json.data !== undefined) {
+      return json.data
+    }
+
+    // 无 code 也无 data 时，直接返回整个响应体（兼容旧接口）
+    return json as T
   }
 
   async get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
@@ -96,13 +105,17 @@ class ApiClient {
       )
     }
 
-    const json: ApiResponse<T> = await response.json()
+    const json: ApiResponse<T> & Record<string, any> = await response.json()
 
-    if (json.code !== 0) {
+    if (json.code !== undefined && json.code !== 0) {
       throw new Error(json.message || '上传失败')
     }
 
-    return json.data
+    if (json.data !== undefined) {
+      return json.data
+    }
+
+    return json as T
   }
 }
 

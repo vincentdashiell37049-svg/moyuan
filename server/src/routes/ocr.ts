@@ -15,6 +15,33 @@ const { Converter } = require('opencc-js');
 
 const converter = Converter({ from: 'tw', to: 'cn' });
 
+/* ---------- 数据库 snake_case -> 前端 camelCase ---------- */
+function mapMaterial(row: any): any {
+  if (!row) return row;
+  return {
+    ...row,
+    sourceDb: row.source_db,
+    sourceBook: row.source_book,
+    sourceAuthor: row.source_author,
+    sourceVersion: row.source_version,
+    sourceVolume: row.source_volume,
+    bookName: row.source_book,
+    version: row.source_version,
+    volumePage: row.source_volume,
+    reliability: row.credibility,
+    ocrText: row.original_text,
+    simplifiedText: row.converted_text,
+    punctuatedText: row.punctuated_text,
+    finalText: row.final_text,
+    content: row.original_text || row.final_text || '',
+    ocrConfidence: row.ocr_confidence,
+    filePath: row.file_path,
+    fileType: row.file_type,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 const router = Router();
 
 // 配置 multer 存储
@@ -314,7 +341,20 @@ router.get('/result/:taskId', (req: Request, res: Response) => {
 // POST /api/ocr/save - 将处理结果保存到 materials 表
 router.post('/save', (req: Request, res: Response) => {
   try {
-    const { taskId, title, sourceBook, sourceAuthor, credibility = 'secondary' } = req.body;
+    const {
+      taskId,
+      title,
+      sourceDb,
+      bookName,
+      version,
+      volumePage,
+      reliability,
+      sourceAuthor,
+      tagIds,
+      ocrText,
+      simplifiedText,
+      finalText,
+    } = req.body;
 
     if (!taskId || !title) {
       return res.status(400).json({ code: 400, message: 'taskId 和 title 不能为空' });
@@ -330,30 +370,52 @@ router.post('/save', (req: Request, res: Response) => {
       return res.status(400).json({ code: 400, message: '任务尚未完成，无法保存' });
     }
 
-    const result = JSON.parse(task.result || '{}');
+    const taskResult = JSON.parse(task.result || '{}');
 
     const insertResult = db.prepare(`
       INSERT INTO materials (title, original_text, converted_text, punctuated_text, final_text,
-        ocr_confidence, status, source_book, source_author, credibility)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ocr_confidence, status, source_db, source_book, source_author, source_version,
+        source_volume, credibility, file_path, file_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       title,
-      result.originalText || '',
-      result.convertedText || '',
-      result.punctuatedText || '',
-      result.finalText || '',
-      0.85, // demo 模式下设置一个默认置信度
+      ocrText || taskResult.originalText || '',
+      simplifiedText || taskResult.convertedText || '',
+      finalText || taskResult.punctuatedText || '',
+      finalText || taskResult.finalText || '',
+      0.85,
       'reviewed',
-      sourceBook || null,
+      sourceDb || null,
+      bookName || null,
       sourceAuthor || null,
-      credibility
+      version || null,
+      volumePage || null,
+      reliability || 'secondary',
+      task.file_path || null,
+      task.file_type || null
     );
 
-    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(insertResult.lastInsertRowid);
+    const materialId = insertResult.lastInsertRowid as number;
+
+    // 保存标签关联
+    if (Array.isArray(tagIds) && tagIds.length > 0) {
+      const insertTag = db.prepare(`
+        INSERT OR IGNORE INTO material_tags (material_id, tag_id) VALUES (?, ?)
+      `);
+      const insertMany = db.transaction(() => {
+        for (const tagId of tagIds) {
+          if (tagId) insertTag.run(materialId, Number(tagId));
+        }
+      });
+      insertMany();
+    }
+
+    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(materialId);
 
     res.status(201).json({
+      code: 0,
       message: '保存成功',
-      data: material,
+      data: material ? mapMaterial(material) : null,
     });
   } catch (err) {
     console.error('[OCR Save Error]', err);
@@ -495,7 +557,16 @@ router.post('/export-word', async (req: Request, res: Response) => {
 // POST /api/ocr/save-all - 一键保存所有页到史料库
 router.post('/save-all', (req: Request, res: Response) => {
   try {
-    const { taskId, title, sourceBook, sourceAuthor, credibility = 'secondary' } = req.body;
+    const {
+      taskId,
+      title,
+      sourceDb,
+      bookName,
+      version,
+      volumePage,
+      reliability,
+      sourceAuthor,
+    } = req.body;
     if (!taskId || !title) {
       return res.status(400).json({ code: 400, message: 'taskId 和 title 不能为空' });
     }
@@ -514,8 +585,9 @@ router.post('/save-all', (req: Request, res: Response) => {
 
     const insert = db.prepare(`
       INSERT INTO materials (title, original_text, converted_text, punctuated_text, final_text,
-        ocr_confidence, status, source_book, source_author, credibility)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ocr_confidence, status, source_db, source_book, source_author, source_version,
+        source_volume, credibility, file_path, file_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const ids: number[] = [];
@@ -531,9 +603,14 @@ router.post('/save-all', (req: Request, res: Response) => {
           simplePunctuate(converted),
           0.85,
           'reviewed',
-          sourceBook || null,
+          sourceDb || null,
+          bookName || null,
           sourceAuthor || null,
-          credibility
+          version || null,
+          volumePage || null,
+          reliability || 'secondary',
+          task.file_path || null,
+          task.file_type || null
         );
         ids.push(row.lastInsertRowid as number);
       }
@@ -542,9 +619,12 @@ router.post('/save-all', (req: Request, res: Response) => {
     insertMany();
 
     res.status(201).json({
+      code: 0,
       message: '保存成功',
-      count: ids.length,
-      ids,
+      data: {
+        count: ids.length,
+        ids,
+      },
     });
   } catch (err) {
     console.error('[OCR Save All Error]', err);

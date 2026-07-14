@@ -8,6 +8,33 @@ import db from '../db';
 
 const router = Router();
 
+/* ---------- 将数据库 snake_case 字段映射为前端 camelCase ---------- */
+function mapMaterial(row: any): any {
+  if (!row) return row;
+  return {
+    ...row,
+    sourceDb: row.source_db,
+    sourceBook: row.source_book,
+    sourceAuthor: row.source_author,
+    sourceVersion: row.source_version,
+    sourceVolume: row.source_volume,
+    bookName: row.source_book,
+    version: row.source_version,
+    volumePage: row.source_volume,
+    reliability: row.credibility,
+    ocrText: row.original_text,
+    simplifiedText: row.converted_text,
+    punctuatedText: row.punctuated_text,
+    finalText: row.final_text,
+    content: row.original_text || row.final_text || '',
+    ocrConfidence: row.ocr_confidence,
+    filePath: row.file_path,
+    fileType: row.file_type,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 // GET /api/materials - 获取史料列表，支持搜索、筛选、分页
 router.get('/', (req: Request, res: Response) => {
   try {
@@ -83,15 +110,20 @@ router.get('/', (req: Request, res: Response) => {
       WHERE mt.material_id = ?
     `);
     const itemsWithTags = items.map((item) => ({
-      ...item,
+      ...mapMaterial(item),
       tags: tagStmt.all(item.id),
     }));
 
     res.json({
-      items: itemsWithTags,
-      total,
-      page: pageNum,
-      limit: limitNum,
+      code: 0,
+      message: '获取成功',
+      data: {
+        list: itemsWithTags,
+        total,
+        page: pageNum,
+        pageSize: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
     });
   } catch (err) {
     console.error('[Materials List Error]', err);
@@ -124,9 +156,13 @@ router.get('/:id', (req: Request, res: Response) => {
     `).all(material.id);
 
     res.json({
-      ...material,
-      tags,
-      entities,
+      code: 0,
+      message: '获取成功',
+      data: {
+        ...mapMaterial(material),
+        tags,
+        entities,
+      },
     });
   } catch (err) {
     console.error('[Material Detail Error]', err);
