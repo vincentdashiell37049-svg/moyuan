@@ -70,12 +70,6 @@ const ACCEPTED_TYPES = [
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024
 
-const SOURCE_DB_OPTIONS = [
-  { value: '中国基本古籍库', label: '中国基本古籍库' },
-  { value: '四库全书', label: '四库全书' },
-  { value: '其他', label: '其他' },
-]
-
 const RELIABILITY_OPTIONS = [
   { value: '一手史料', label: '一手史料' },
   { value: '二手史料', label: '二手史料' },
@@ -1946,9 +1940,12 @@ export default function RecognizePage() {
                   >
                     来源数据库
                   </label>
-                  <select
+                  <input
+                    type="text"
+                    list="source-db-list"
                     value={saveForm.sourceDb}
                     onChange={(e) => setSaveForm((prev) => ({ ...prev, sourceDb: e.target.value }))}
+                    placeholder="请选择或输入来源"
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -1958,16 +1955,16 @@ export default function RecognizePage() {
                       color: 'var(--ink)',
                       backgroundColor: '#fff',
                       outline: 'none',
-                      cursor: 'pointer',
+                      cursor: 'text',
                     }}
-                  >
-                    <option value="">请选择</option>
-                    {SOURCE_DB_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--rule)')}
+                  />
+                  <datalist id="source-db-list">
+                    <option value="中国基本古籍库" />
+                    <option value="四库全书" />
+                    <option value="其他" />
+                  </datalist>
                 </div>
                 <div>
                   <label
