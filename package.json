@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "dev:server": "cd server && npx tsx watch src/index.ts",
-    "dev:client": "cd client && npx vite",
+    "dev:server": "cd server && NO_PROXY=localhost,127.0.0.1 npx tsx watch src/index.ts",
+    "dev:client": "cd client && NO_PROXY=localhost,127.0.0.1 npx vite",
     "build": "cd client && npx vite build",
     "start": "npx tsx server/src/index.ts",
     "install:all": "npm install && cd server && npm install && cd ../client && npm install"
