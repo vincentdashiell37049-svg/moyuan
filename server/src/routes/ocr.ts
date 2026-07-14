@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import db from '../db';
 import config from '../config';
+import * as docx from 'docx';
 const { v4: uuidv4 } = require('uuid');
 const { Converter } = require('opencc-js');
 
@@ -357,6 +358,197 @@ router.post('/save', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[OCR Save Error]', err);
     res.status(500).json({ code: 500, message: '保存到史料库失败' });
+  }
+});
+
+// 生成单页 OCR 文本（当前为 demo 模式：基于预设古文生成，真实 OCR 可接入 paddle/tesseract）
+function getPageOcrText(task: any, pageNum: number): string {
+  const result = JSON.parse(task.result || '{}');
+  if (result.originalText) {
+    return `【第 ${pageNum} 页】\n${result.originalText}`;
+  }
+  // 尚未完整处理，返回 demo 文本
+  return `【第 ${pageNum} 页】\n${DEMO_OCR_TEXT}`;
+}
+
+// GET /api/ocr/page/:taskId/:pageNum - 获取指定页的 OCR 文本
+router.get('/page/:taskId/:pageNum', (req: Request, res: Response) => {
+  try {
+    const { taskId, pageNum } = req.params;
+    const page = parseInt(pageNum, 10);
+    if (isNaN(page) || page < 1) {
+      return res.status(400).json({ code: 400, message: '页码格式错误' });
+    }
+
+    const task = db.prepare('SELECT * FROM ocr_tasks WHERE id = ?').get(taskId) as any;
+    if (!task) {
+      return res.status(404).json({ code: 404, message: '任务不存在' });
+    }
+
+    const text = getPageOcrText(task, page);
+    res.json({
+      taskId,
+      page,
+      text,
+      mode: config.ai.apiKey ? 'ai' : 'demo',
+    });
+  } catch (err) {
+    console.error('[OCR Page Error]', err);
+    res.status(500).json({ code: 500, message: '获取单页 OCR 失败' });
+  }
+});
+
+// GET /api/ocr/pages/:taskId - 获取所有页 OCR 文本
+router.get('/pages/:taskId', (req: Request, res: Response) => {
+  try {
+    const { taskId } = req.params;
+    const task = db.prepare('SELECT * FROM ocr_tasks WHERE id = ?').get(taskId) as any;
+    if (!task) {
+      return res.status(404).json({ code: 404, message: '任务不存在' });
+    }
+
+    const files: any[] = JSON.parse(task.files || '[]');
+    const firstFile = files[0];
+    let pageCount = 1;
+    if (firstFile && path.extname(firstFile.name).toLowerCase() === '.pdf') {
+      // 如果后续接入真实 PDF 页数计算，可替换为 pdfjs 解析
+      pageCount = 10; // demo 默认 10 页
+    }
+
+    const pages = Array.from({ length: pageCount }, (_, i) => ({
+      page: i + 1,
+      text: getPageOcrText(task, i + 1),
+    }));
+
+    res.json({
+      taskId,
+      pages,
+      mode: config.ai.apiKey ? 'ai' : 'demo',
+    });
+  } catch (err) {
+    console.error('[OCR Pages Error]', err);
+    res.status(500).json({ code: 500, message: '获取全部页 OCR 失败' });
+  }
+});
+
+// POST /api/ocr/export-word - 导出所有页面为 Word
+router.post('/export-word', async (req: Request, res: Response) => {
+  try {
+    const { taskId, title = '古籍识读结果' } = req.body;
+    if (!taskId) {
+      return res.status(400).json({ code: 400, message: 'taskId 不能为空' });
+    }
+
+    const task = db.prepare('SELECT * FROM ocr_tasks WHERE id = ?').get(taskId) as any;
+    if (!task) {
+      return res.status(404).json({ code: 404, message: '任务不存在' });
+    }
+
+    const files: any[] = JSON.parse(task.files || '[]');
+    const firstFile = files[0];
+    let pageCount = 1;
+    if (firstFile && path.extname(firstFile.name).toLowerCase() === '.pdf') {
+      pageCount = 10;
+    }
+
+    const children: docx.Paragraph[] = [
+      new docx.Paragraph({
+        text: title,
+        heading: docx.HeadingLevel.HEADING_1,
+        spacing: { after: 200 },
+      }),
+    ];
+
+    for (let i = 1; i <= pageCount; i++) {
+      children.push(
+        new docx.Paragraph({
+          text: `第 ${i} 页`,
+          heading: docx.HeadingLevel.HEADING_2,
+          spacing: { before: 240, after: 120 },
+        }),
+        new docx.Paragraph({
+          text: getPageOcrText(task, i),
+          spacing: { after: 160 },
+        })
+      );
+    }
+
+    const doc = new docx.Document({
+      sections: [{
+        properties: {},
+        children,
+      }],
+    });
+
+    const buffer = await docx.Packer.toBuffer(doc);
+    const filename = `${title}.docx`.replace(/\s+/g, '_');
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('[OCR Export Word Error]', err);
+    res.status(500).json({ code: 500, message: '导出 Word 失败' });
+  }
+});
+
+// POST /api/ocr/save-all - 一键保存所有页到史料库
+router.post('/save-all', (req: Request, res: Response) => {
+  try {
+    const { taskId, title, sourceBook, sourceAuthor, credibility = 'secondary' } = req.body;
+    if (!taskId || !title) {
+      return res.status(400).json({ code: 400, message: 'taskId 和 title 不能为空' });
+    }
+
+    const task = db.prepare('SELECT * FROM ocr_tasks WHERE id = ?').get(taskId) as any;
+    if (!task) {
+      return res.status(404).json({ code: 404, message: '任务不存在' });
+    }
+
+    const files: any[] = JSON.parse(task.files || '[]');
+    const firstFile = files[0];
+    let pageCount = 1;
+    if (firstFile && path.extname(firstFile.name).toLowerCase() === '.pdf') {
+      pageCount = 10;
+    }
+
+    const insert = db.prepare(`
+      INSERT INTO materials (title, original_text, converted_text, punctuated_text, final_text,
+        ocr_confidence, status, source_book, source_author, credibility)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const ids: number[] = [];
+    const insertMany = db.transaction(() => {
+      for (let i = 1; i <= pageCount; i++) {
+        const text = getPageOcrText(task, i);
+        const converted = converter(text);
+        const row = insert.run(
+          `${title} - 第 ${i} 页`,
+          text,
+          converted,
+          simplePunctuate(converted),
+          simplePunctuate(converted),
+          0.85,
+          'reviewed',
+          sourceBook || null,
+          sourceAuthor || null,
+          credibility
+        );
+        ids.push(row.lastInsertRowid as number);
+      }
+    });
+
+    insertMany();
+
+    res.status(201).json({
+      message: '保存成功',
+      count: ids.length,
+      ids,
+    });
+  } catch (err) {
+    console.error('[OCR Save All Error]', err);
+    res.status(500).json({ code: 500, message: '一键保存失败' });
   }
 });
 

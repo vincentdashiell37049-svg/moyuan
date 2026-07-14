@@ -164,8 +164,14 @@ export default function RecognizePage() {
   const [overallProgress, setOverallProgress] = useState(0)
   const [taskId, setTaskId] = useState<string>('')
   const [result, setResult] = useState<OcrResultData | null>(null)
-  const [activeTab, setActiveTab] = useState<'ocr' | 'simplified' | 'final'>('ocr')
+  const [activeTab, setActiveTab] = useState<'ocr' | 'simplified' | 'final' | 'page'>('ocr')
   const [editableText, setEditableText] = useState<Record<string, string>>({})
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageResults, setPageResults] = useState<Record<number, string>>({})
+  const [extractingPage, setExtractingPage] = useState(false)
+  const [extractingAll, setExtractingAll] = useState(false)
+  const [exportingWord, setExportingWord] = useState(false)
+  const [savingAll, setSavingAll] = useState(false)
   const [error, setError] = useState<string>('')
 
   const [aiPunctuationResult, setAiPunctuationResult] = useState<AiPunctuationResult | null>(null)
@@ -503,6 +509,8 @@ export default function RecognizePage() {
     setResult(null)
     setEditableText({})
     setActiveTab('ocr')
+    setCurrentPage(1)
+    setPageResults({})
     setError('')
     setAiPunctuationResult(null)
     setAiPunctuationError('')
@@ -514,13 +522,111 @@ export default function RecognizePage() {
     }
   }, [files])
 
+  /* ---------- 单页 OCR 提取 ---------- */
+  const handlePageSelect = useCallback(async (pageNum: number) => {
+    setCurrentPage(pageNum)
+    setActiveTab('page')
+    if (!taskId || pageResults[pageNum]) return
+
+    setExtractingPage(true)
+    try {
+      const res = await fetch(`/api/ocr/page/${taskId}/${pageNum}`)
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setPageResults((prev) => ({ ...prev, [pageNum]: data.text || '' }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '单页提取失败')
+    } finally {
+      setExtractingPage(false)
+    }
+  }, [taskId, pageResults])
+
+  /* ---------- 一键提取全部 ---------- */
+  const handleExtractAll = useCallback(async () => {
+    if (!taskId) return
+    setExtractingAll(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/ocr/pages/${taskId}`)
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      const map: Record<number, string> = {}
+      data.pages?.forEach((p: { page: number; text: string }) => {
+        map[p.page] = p.text
+      })
+      setPageResults(map)
+      setActiveTab('page')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '全部提取失败')
+    } finally {
+      setExtractingAll(false)
+    }
+  }, [taskId])
+
+  /* ---------- 导出 Word ---------- */
+  const handleExportWord = useCallback(async () => {
+    if (!taskId) return
+    setExportingWord(true)
+    setError('')
+    try {
+      const res = await fetch('/api/ocr/export-word', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, title: saveForm.title || files[0]?.file.name.replace(/\.[^.]+$/, '') || '古籍识读结果' }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${saveForm.title || '古籍识读结果'}.docx`.replace(/\s+/g, '_')
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '导出 Word 失败')
+    } finally {
+      setExportingWord(false)
+    }
+  }, [taskId, saveForm.title, files])
+
+  /* ---------- 一键保存全部 ---------- */
+  const handleSaveAll = useCallback(async () => {
+    if (!taskId) return
+    setSavingAll(true)
+    setError('')
+    try {
+      const res = await fetch('/api/ocr/save-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskId,
+          title: saveForm.title || files[0]?.file.name.replace(/\.[^.]+$/, '') || '古籍识读结果',
+          sourceBook: saveForm.bookName,
+          sourceAuthor: '',
+          credibility: saveForm.reliability || 'secondary',
+        }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      alert(`已保存 ${data.count} 页到史料库`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSavingAll(false)
+    }
+  }, [taskId, saveForm.title, saveForm.bookName, saveForm.reliability, files])
+
   /* ---------- 当前 tab 文本 ---------- */
   const currentTabText = result
     ? activeTab === 'ocr'
       ? editableText.ocr
       : activeTab === 'simplified'
       ? editableText.simplified
-      : editableText.final
+      : activeTab === 'final'
+      ? editableText.final
+      : pageResults[currentPage] || ''
+    : activeTab === 'page'
+    ? pageResults[currentPage] || ''
     : ''
 
   const handleTabTextChange = useCallback(
@@ -1204,6 +1310,74 @@ export default function RecognizePage() {
                 </svg>
                 重新处理
               </button>
+
+              {files[0]?.file.type === 'application/pdf' && (
+                <>
+                  <button
+                    onClick={handleExtractAll}
+                    disabled={extractingAll}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#fff',
+                      color: 'var(--accent)',
+                      border: '1px solid var(--accent)',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      cursor: extractingAll ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'opacity 0.15s',
+                      opacity: extractingAll ? 0.7 : 1,
+                    }}
+                  >
+                    {extractingAll ? '提取中...' : '一键提取全部'}
+                  </button>
+
+                  <button
+                    onClick={handleExportWord}
+                    disabled={exportingWord}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: '#fff',
+                      color: 'var(--ink)',
+                      border: '1px solid var(--rule)',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      cursor: exportingWord ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'border-color 0.15s',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--rule)')}
+                  >
+                    {exportingWord ? '导出中...' : '导出 Word'}
+                  </button>
+
+                  <button
+                    onClick={handleSaveAll}
+                    disabled={savingAll}
+                    style={{
+                      padding: '8px 16px',
+                      backgroundColor: 'var(--accent2)',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      cursor: savingAll ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'opacity 0.15s',
+                      opacity: savingAll ? 0.7 : 1,
+                    }}
+                  >
+                    {savingAll ? '保存中...' : '一键保存全部'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -1259,7 +1433,11 @@ export default function RecognizePage() {
               >
               {files[0]?.previewUrl ? (
                   files[0]?.file.type === 'application/pdf' ? (
-                    <PdfPageViewer pdfUrl={files[0].previewUrl} />
+                    <PdfPageViewer
+                      pdfUrl={files[0].previewUrl}
+                      onPageSelect={handlePageSelect}
+                      maxHeight={480}
+                    />
                   ) : (
                     <img
                       src={files[0].previewUrl}
@@ -1334,6 +1512,7 @@ export default function RecognizePage() {
                   { key: 'ocr' as const, label: 'OCR原文' },
                   { key: 'simplified' as const, label: '简体标点' },
                   { key: 'final' as const, label: '最终文本' },
+                  { key: 'page' as const, label: '当前页' },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -1354,6 +1533,24 @@ export default function RecognizePage() {
                   </button>
                 ))}
               </div>
+
+              {activeTab === 'page' && (
+                <div
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: 'var(--bg2)',
+                    borderBottom: '1px solid var(--rule)',
+                    fontSize: '13px',
+                    color: 'var(--muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span>当前展示：第 {currentPage} 页</span>
+                  {extractingPage && <span>提取中...</span>}
+                </div>
+              )}
 
               {/* 文本编辑区 + AI 结果 */}
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>

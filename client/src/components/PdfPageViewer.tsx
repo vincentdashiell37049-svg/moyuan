@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjs from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import PdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker'
 
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+const worker = new PdfWorker()
+pdfjs.GlobalWorkerOptions.workerPort = worker
 
 interface PdfPageViewerProps {
   pdfUrl: string
+  onPageSelect?: (pageNum: number, pageImage?: string) => void
+  maxHeight?: string | number
 }
 
-export default function PdfPageViewer({ pdfUrl }: PdfPageViewerProps) {
+export default function PdfPageViewer({ pdfUrl, onPageSelect, maxHeight = 520 }: PdfPageViewerProps) {
   const [pdfDoc, setPdfDoc] = useState<pdfjs.PDFDocumentProxy | null>(null)
   const [pageCount, setPageCount] = useState(0)
   const [selectedPage, setSelectedPage] = useState(1)
@@ -72,16 +75,13 @@ export default function PdfPageViewer({ pdfUrl }: PdfPageViewerProps) {
     if (!ctx) throw new Error('无法创建 canvas 上下文')
 
     const dpr = window.devicePixelRatio || 1
-    canvas.width = viewport.width * dpr
-    canvas.height = viewport.height * dpr
-    canvas.style.width = `${viewport.width}px`
-    canvas.style.height = `${viewport.height}px`
+    canvas.width = Math.floor(viewport.width * dpr)
+    canvas.height = Math.floor(viewport.height * dpr)
 
     await page.render({
       canvasContext: ctx as any,
       viewport,
       canvas,
-      transform: [dpr, 0, 0, dpr, 0, 0],
     }).promise
 
     page.cleanup()
@@ -108,7 +108,9 @@ export default function PdfPageViewer({ pdfUrl }: PdfPageViewerProps) {
             setThumbnails((prev) => ({ ...prev, [i]: url }))
           }
         } catch (err) {
-          console.error(`缩略图生成失败（第 ${i} 页）:`, err)
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error(`缩略图生成失败（第 ${i} 页）:`, msg)
+          if (i === 1) setError(`PDF 渲染失败：${msg}`)
         }
       }
       if (!controller.signal.aborted) setLoading(false)
@@ -149,6 +151,13 @@ export default function PdfPageViewer({ pdfUrl }: PdfPageViewerProps) {
     }
   }, [pdfDoc, selectedPage, pageCount])
 
+  /* ---------- 通知父组件页码选择 ---------- */
+  useEffect(() => {
+    if (selectedPage > 0 && pageCount > 0 && onPageSelect) {
+      onPageSelect(selectedPage, mainImage || undefined)
+    }
+  }, [selectedPage, pageCount, mainImage, onPageSelect])
+
   if (error) {
     return (
       <div
@@ -172,6 +181,7 @@ export default function PdfPageViewer({ pdfUrl }: PdfPageViewerProps) {
       style={{
         width: '100%',
         height: '100%',
+        maxHeight: typeof maxHeight === 'number' ? `${maxHeight}px` : maxHeight,
         display: 'flex',
         overflow: 'hidden',
       }}
