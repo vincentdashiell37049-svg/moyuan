@@ -30,9 +30,16 @@ const defaultDbPath = path.resolve(process.cwd(), 'data/moyuan.db');
 const defaultUploadsDir = path.resolve(process.cwd(), 'uploads');
 const defaultClientDist = path.resolve(process.cwd(), 'client/dist');
 
+// Railway 持久化卷支持：DATA_DIR 设置后，数据库和上传文件都存到该目录
+const dataDir = getEnvString('DATA_DIR', '');
+const dbPath = dataDir
+  ? path.join(dataDir, 'moyuan.db')
+  : getEnvString('DB_PATH', defaultDbPath);
+const uploadsDir = dataDir
+  ? path.join(dataDir, 'uploads')
+  : getEnvString('UPLOADS_DIR', defaultUploadsDir);
+
 // 确保目录存在
-const dbPath = getEnvString('DB_PATH', defaultDbPath);
-const uploadsDir = getEnvString('UPLOADS_DIR', defaultUploadsDir);
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });

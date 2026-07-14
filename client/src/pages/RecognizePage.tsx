@@ -277,7 +277,7 @@ export default function RecognizePage() {
       })
       if (!uploadRes.ok) throw new Error('上传失败')
       const uploadJson = await uploadRes.json()
-      const tid = uploadJson.data?.taskId || uploadJson.data?.id || uploadJson.data
+      const tid = uploadJson.taskId || uploadJson.data?.taskId || uploadJson.data?.id
       if (!tid) throw new Error('上传响应缺少 taskId')
       setTaskId(String(tid))
 
@@ -293,7 +293,7 @@ export default function RecognizePage() {
           const statusRes = await fetch(`/api/ocr/status/${tid}`)
           if (!statusRes.ok) return
           const statusJson = await statusRes.json()
-          const sd = statusJson.data
+          const sd = statusJson.data || statusJson
 
           if (!sd) return
 
@@ -340,11 +340,11 @@ export default function RecognizePage() {
             const resultRes = await fetch(`/api/ocr/result/${tid}`)
             if (!resultRes.ok) throw new Error('获取结果失败')
             const resultJson = await resultRes.json()
-            const rd = resultJson.data
+            const rd = resultJson.data || resultJson.result || resultJson
 
             const ocrResult: OcrResultData = {
-              ocrText: rd.ocrText || rd.rawText || rd.text || '',
-              simplifiedText: rd.simplifiedText || rd.simplified || '',
+              ocrText: rd.ocrText || rd.originalText || rd.rawText || rd.text || '',
+              simplifiedText: rd.simplifiedText || rd.convertedText || rd.simplified || '',
               punctuatedText: rd.punctuatedText || rd.punctuated || '',
               finalText: rd.finalText || rd.result || rd.text || '',
               blocks: (rd.blocks || []).map((b: { text?: string; confidence?: number }) => ({
