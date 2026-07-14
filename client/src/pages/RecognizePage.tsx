@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import api from '../services/api'
+import PdfPageViewer from '../components/PdfPageViewer'
 
 /* ===================== 类型定义 ===================== */
 
@@ -1258,17 +1259,7 @@ export default function RecognizePage() {
               >
               {files[0]?.previewUrl ? (
                   files[0]?.file.type === 'application/pdf' ? (
-                    <embed
-                      src={files[0].previewUrl}
-                      type="application/pdf"
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        minHeight: '420px',
-                        borderRadius: '4px',
-                        border: 'none',
-                      }}
-                    />
+                    <PdfPageViewer pdfUrl={files[0].previewUrl} />
                   ) : (
                     <img
                       src={files[0].previewUrl}

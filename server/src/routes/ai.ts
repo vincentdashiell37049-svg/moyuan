@@ -11,7 +11,7 @@ const converter = Converter({ from: 'tw', to: 'cn' });
 
 const router = Router();
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 30000) {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 60000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -89,6 +89,7 @@ ${String(text)}`;
         model: config.ai.chatModel,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
+        thinking: { type: 'disabled' },
       }),
     });
 
@@ -178,6 +179,7 @@ ${original}`;
         model: config.ai.chatModel,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
+        thinking: { type: 'disabled' },
       }),
     });
 
