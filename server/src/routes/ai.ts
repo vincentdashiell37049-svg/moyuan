@@ -11,7 +11,7 @@ const converter = Converter({ from: 'tw', to: 'cn' });
 
 const router = Router();
 
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 8000) {
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 30000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {

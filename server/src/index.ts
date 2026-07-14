@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import app from './app';
 import config from './config';
 import db from './db';
@@ -5,10 +6,11 @@ import db from './db';
 const PORT = config.port;
 
 const server = app.listen(PORT, () => {
-  console.log(`[墨渊] 后端服务已启动`);
+  console.log(`[墨苑] 后端服务已启动`);
   console.log(`  地址: http://localhost:${PORT}`);
   console.log(`  环境: ${config.isDev ? 'development' : 'production'}`);
   console.log(`  数据库: ${config.dbPath}`);
+  console.log(`  AI 服务: ${config.ai.apiKey ? '已配置 (' + config.ai.apiBaseUrl + ')' : '未配置'}`);
 });
 
 // 优雅关闭
